@@ -140,17 +140,20 @@ def assign_id_to_list(input):
 
 # Finds the the edges within the given window size
 def create_edges(arr, window_size):
-    W = []
-    S = []
+    temp = []
+    edges = []
     for element in arr:
-        if len(W) == window_size:
-            edges = permutations(W, 2)
-            for edge in edges:
-                if edge[0] != edge[1]:
-                    S.append(edge)
-            W.pop(0)
-        W.append(element)
-    return S
+        if len(temp) == window_size:
+            # Creates tuples for all the relationships within the window size
+            relations = permutations(temp, 2)
+            for r in relations:
+                # Removes reflexive relationships
+                if r[0] != r[1]:
+                    edges.append(r)
+            # Remove first element from temporary list
+            temp.pop(0)
+        temp.append(element)
+    return edges
 
 
 def get_id(tuples, token):
