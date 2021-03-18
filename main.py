@@ -1,6 +1,4 @@
-
-
-from sw import stop_words
+from stop_words import stop_words
 from itertools import permutations
 from itertools import islice
 import math
@@ -19,10 +17,7 @@ def initializeSpark():
     spark = SparkSession.builder.master(
         "local[*]").appName("TDT4305 - Project Part 2").getOrCreate()
     sc = spark.sparkContext
-    sc.addPyFile(
-        "graphframes-0.8.1-spark3.0-s_2.12.jar")
-    sc.addPyFile(
-        "graphframes.zip")
+
     sc.setLogLevel("WARN")
     return sc
 
@@ -75,9 +70,8 @@ def make_stripped_string(post_rdd, post_id):
     # Removes first three and last 2 characters
     lowercase = lowercase[3:][:-2]
 
-    # Removes &#xa (newline)
+    # Removes &#xa (newline), paragraph and bold tags
     lowercase = lowercase.replace("&#xa", "")
-
     lowercase = lowercase.replace("<p>", "")
     lowercase = lowercase.replace("</p>", "")
     lowercase = lowercase.replace("<b>", "")
@@ -90,21 +84,21 @@ def make_stripped_string(post_rdd, post_id):
         doc = doc.replace(punctuation, "")
 
     # First replace DOT with whitespace (using whitespace to separate words in beginning and end of sentences)
-    # This is done instead of removing DOT from tokens later, as doing this will not fix the problem of words in
-    # end and start of sentences becoming one token. (For example 'analyzed.my' on post_id = 14)
+    # This is done instead of removing DOT from tokens later, as doing this will not fix the problem of words in the
+    # end and start of sentences becoming one token. (An example of this would be 'analyzed.my' on post_id = 14)
     doc = doc.replace(".", " ")
 
     # Removes whitespaces and TAB charaters (\t)
     a_list = doc.split()
     doc = " ".join(a_list)
 
-    temp = doc
+    filtered = doc
     # Using triple qotes to include qotation marks in the string
     special_chars = """"'#$%&<=>@~()*+-/[]^_`{|}"""
     for character in special_chars:
-        temp = temp.replace(character, "")
+        filtered = filtered.replace(character, "")
 
-    return temp
+    return filtered
 
 
 def tokenize(string):
@@ -121,12 +115,10 @@ def tokenize(string):
     # Remove stopwords
     sw = stop_words()
     word_tokens = new_tokens
-    filtered_tokens = [w for w in word_tokens if not w in sw]
     filtered_tokens = []
     for w in word_tokens:
         if w not in sw:
             filtered_tokens.append(w)
-
     return filtered_tokens
 
 
@@ -146,49 +138,46 @@ def assign_id_to_list(input):
     return tokens
 
 
-def slide_over(seq, w):
-    num_chunks = ((len(seq) - w)) + 1
-    for i in range(0, num_chunks, 1):
-        yield seq[i:i + w]
-
-
-# Function for finding the permutations in a 5 word "window", used for finding edges
-def windowSlider(someList):
+# Finds the the edges within the given window size
+def create_edges(arr, window_size):
     W = []
     S = []
-    for w in someList:
-        if len(W) == 5:
+    for element in arr:
+        if len(W) == window_size:
             edges = permutations(W, 2)
-            for perm in edges:
-                if perm[0] != perm[1]:
-                    S.append(perm)
+            for edge in edges:
+                if edge[0] != edge[1]:
+                    S.append(edge)
             W.pop(0)
-        W.append(w)
+        W.append(element)
     return S
 
 
-def get_id(tokens, word):
-    for id, i in tokens:
-        if i == word:
+def get_id(tuples, token):
+    for id, i in tuples:
+        if i == token:
             return id
     return -1
 
 
-def setIDs(tuple_unike_ord, alle_ord):
-    newList = []
+def assign_unique_ids(unique_tuple, tokens):
+    # Iterates through all the tokens and finds the unique id for each token
+    final = []
+    for token in tokens:
+        unique = get_id(unique_tuple, token)
+        tuple = (unique, token)
+        final.append(tuple)
+    return final
 
-    for word in alle_ord:
-        unik_id = get_id(tuple_unike_ord, word)
-        tuple = (unik_id, word)
-        newList.append(tuple)
-    return newList
+
+def remove_dupe_tuples(lst):
+    return [t for t in (set(tuple(i) for i in lst))]
 
 
 def main():
 
     sc = initializeSpark()
-    # sc.addPyFile(
-    # 'https://github.com/graphframes/graphframes/archive/b3b97cf1dac9e7be7806a938c8de406e5c09f431.zip')
+
     spark = SparkSession(sc)
 
     directory, post_id = parse_pls()
@@ -199,52 +188,44 @@ def main():
 
     print("\n Body from post_id: " + str(post_id) +
           ", stripped of shitespaces and special characters:\n")
-    print(string + "\n")
+    print("'" + string + "'\n")
+
+    # Tokenize the string
     tokens = tokenize(string)
     # remove duplicate entries
     tokens_unique = remove_dupes(tokens)
 
-    # for i in tokens:
-    # print(i)
-
-    # print("\n")
-    # Assign id to tokens
+    # Assign id to the unique tokens
     token_id_tuple = assign_id_to_list(tokens_unique)
-    token_id_all = setIDs(token_id_tuple, tokens)
+    # Now assign these id's the the original token list
+    token_id_all = assign_unique_ids(token_id_tuple, tokens)
 
-   # print(token_id_tuple)
-   # print("\n")
-    # print(token_id_all)
-
-    print("\nTokens retrieved from the body: \n")
+    print("\nTokens retrieved from the body with their respective id's: \n")
     for i in token_id_all:
         print(i)
 
-    # for i in token_id_tuple:
-    # print(i)
-
-    print("\n\nSliding window:\n")
-    num_slides = 0
-    for slice in slide_over(tokens, 5):
-        print(num_slides * "\t", slice)
-        num_slides = num_slides + 1
-
     print("\n\nEdges:\n")
-    ids = [id[0] for id in token_id_all]
-    edges = windowSlider(ids)
+    ids = []
+    for i in token_id_all:
+        ids.append(i[0])
+
+    # Create edges on a window size of 5, using the ids of the tokens
+    edges = create_edges(ids, 5)
+    # Removes duplicate edges from list
+    edges = remove_dupe_tuples(edges)
     print(edges)
     print("\n\nPageRank:")
 
     sqlContext = SQLContext(sc)
 
-    v = sqlContext.createDataFrame(token_id_tuple, ["id", "word", ])
+    v = sqlContext.createDataFrame(token_id_tuple, ["id", "word"])
 
     e = sqlContext.createDataFrame(edges, ["src", "dst"])
 
     g = graphframes.GraphFrame(v, e)
 
     results = g.pageRank(resetProbability=0.15, tol=0.0001)
-    results.vertices.select("id", "pagerank").show(truncate=False)
+    results.vertices.select("word", "pagerank").show(truncate=False)
 
 
 if __name__ == "__main__":
